@@ -569,6 +569,121 @@ static void test_voice_routing(void)
     assert(!voice_enabled(&setting_rc) && setting_rc == ENOENT);
 }
 
+static void expect_button(unsigned button, int down)
+{
+    union ps5_title_input event;
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    assert(event.header.type == PS5_DESKTOP_MOUSE);
+    assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_BUTTON | PS5_TITLE_MOUSE_RELATIVE));
+    assert(event.mouse.button == button && !!event.mouse.down == !!down);
+}
+static void expect_no_input(void)
+{
+    union ps5_title_input event;
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+}
+/* Two-finger touchpad presses are the right button in and out of WoW's
+ * gamepad mode, with Voice-to-Text on, and are released on disconnect. */
+static void test_touchpad_right_click(void)
+{
+    struct input_event pad = {.kind = INPUT_PAD, .connected = 1,
+        .lx = 128, .ly = 128, .rx = 128, .ry = 128,
+        .touches = 2, .touch_id = 40, .touch_x = 300, .touch_y = 300};
+    struct wine_ps5_gamepad_state state;
+    union ps5_title_input event;
+    uint64_t now = input_now_us() + 800000000;
+    unsigned captures, starts;
+    while (pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0)) {}
+    pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+    pointer_cancel();
+    user = 1;
+    voice_hold = (struct voice_hold){0};
+    voice_pending = (struct voice_pending){0};
+    touch_pressed = 0;
+    voice_test_setting = "voice=on";
+
+    /* In WoW (XInput lease held), Voice-to-Text on: the right button,
+     * immediately, with no recording, and nothing reaches XInput. */
+    atomic_store(&gamepad_poll_us, now);
+    captures = voice_captures; starts = voice_starts;
+    route_pad(&pad, now, NULL);
+    expect_no_input();
+    pad.code = PAD_TOUCHPAD;
+    route_pad(&pad, now + 4000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 1);
+    expect_no_input();
+    assert(!pw_title_get_gamepad(0, &state, 0) && !state.pad.buttons);
+    route_pad(&pad, now + 900000, NULL); /* Held well past the voice hold. */
+    expect_no_input();
+    assert(voice_captures == captures && voice_starts == starts);
+    assert(!pw_title_voice_overlay());
+    pad.code = 0;
+    route_pad(&pad, now + 904000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 0);
+    expect_no_input();
+
+    /* Cross during the lease is WoW's, never a click. */
+    pad.touches = 0; pad.code = PAD_CROSS;
+    route_pad(&pad, now + 908000, NULL);
+    expect_no_input();
+    assert(!pw_title_get_gamepad(0, &state, 0) && state.pad.buttons == 0x1000);
+    pad.code = 0;
+    route_pad(&pad, now + 912000, NULL);
+    expect_no_input();
+
+    /* Two presses in a row are two right clicks. */
+    for (int i = 0; i < 2; i++)
+    {
+        pad.touches = 2; pad.touch_id++; pad.code = PAD_TOUCHPAD;
+        route_pad(&pad, now + 920000 + i * 10000, NULL);
+        expect_button(PS5_DESKTOP_BUTTON_RIGHT, 1);
+        pad.code = 0;
+        route_pad(&pad, now + 924000 + i * 10000, NULL);
+        expect_button(PS5_DESKTOP_BUTTON_RIGHT, 0);
+        expect_no_input();
+    }
+
+    /* A disconnect while held releases the right button. */
+    pad.code = PAD_TOUCHPAD; pad.touch_id++;
+    route_pad(&pad, now + 950000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 1);
+    pad = (struct input_event){.kind = INPUT_PAD, .lx = 128, .ly = 128, .rx = 128, .ry = 128};
+    route_pad(&pad, now + 954000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 0);
+    expect_no_input();
+    pad.connected = 1;
+    route_pad(&pad, now + 958000, NULL);
+    expect_no_input();
+
+    /* Outside the lease (Battle.net, menus), the same press is still right,
+     * Circle is still right, and Cross still left. */
+    now += 5000000;
+    assert(!gamepad_mode(now));
+    pad.touches = 2; pad.touch_id = 60; pad.touch_x = pad.touch_y = 300;
+    route_pad(&pad, now, NULL);
+    expect_no_input();
+    pad.code = PAD_TOUCHPAD;
+    route_pad(&pad, now + 4000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 1);
+    pad.code = 0; pad.touches = 0;
+    route_pad(&pad, now + 8000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 0);
+    pad.code = PAD_CIRCLE;
+    route_pad(&pad, now + 12000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 1);
+    pad.code = 0;
+    route_pad(&pad, now + 16000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_RIGHT, 0);
+    pad.code = PAD_CROSS;
+    route_pad(&pad, now + 20000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_LEFT, 1);
+    pad.code = 0;
+    route_pad(&pad, now + 24000, NULL);
+    expect_button(PS5_DESKTOP_BUTTON_LEFT, 0);
+    expect_no_input();
+    voice_test_setting = NULL;
+}
+
 static struct pointer_event wheel_event;
 static unsigned wheel_events;
 static void record_wheel(const struct pointer_event *event, void *context)
@@ -1016,6 +1131,7 @@ int main(void)
     }
     test_cursor_shapes();
     test_voice_routing();
+    test_touchpad_right_click();
     puts("runtime GPU input queue/routing/XInput/IME: PASS");
     return 0;
 }
