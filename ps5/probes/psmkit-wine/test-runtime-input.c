@@ -891,21 +891,42 @@ int main(void)
         route_pad(&device, now + 9, NULL);
         assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
         assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_BUTTON | PS5_TITLE_MOUSE_RELATIVE));
-        /* Two fingers still move the raw mouse, and a press is always left:
-         * WoW's movie can use this one escape hatch during an XInput lease. */
+        /* Two fingers still move the raw mouse (never scroll), and a press
+         * with two fingers on the pad is the right button during an XInput
+         * lease; a one-finger press stays the movie-skip left click. */
         device.touches = 2; device.code |= PAD_TOUCHPAD;
         route_pad(&device, now + 10, NULL);
         assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
         assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_BUTTON | PS5_TITLE_MOUSE_RELATIVE));
-        assert(event.mouse.button == PS5_DESKTOP_BUTTON_LEFT && event.mouse.down);
+        assert(event.mouse.button == PS5_DESKTOP_BUTTON_RIGHT && event.mouse.down);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
         device.touch_x += 10; device.touch_y -= 5;
         route_pad(&device, now + 11, NULL);
         assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
         assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_MOVE | PS5_TITLE_MOUSE_RELATIVE));
         assert(event.mouse.x == 20 && event.mouse.y == -10);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0)); /* No wheel. */
+        device.touches = 1; device.touch_id++; /* Lifting a finger keeps it right. */
+        route_pad(&device, now + 11, NULL);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
         device.touches = 0; device.code = PAD_CROSS;
         route_pad(&device, now + 12, NULL);
         assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+        assert(event.mouse.button == PS5_DESKTOP_BUTTON_RIGHT);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+        /* A one-finger press that gains a second finger stays left. */
+        device.touches = 1; device.touch_id++; device.code |= PAD_TOUCHPAD;
+        route_pad(&device, now + 13, NULL);
+        assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+        assert(event.mouse.button == PS5_DESKTOP_BUTTON_LEFT && event.mouse.down);
+        device.touches = 2; device.touch_id++;
+        route_pad(&device, now + 14, NULL);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+        device.touches = 0; device.code = PAD_CROSS;
+        route_pad(&device, now + 15, NULL);
+        assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+        assert(event.mouse.button == PS5_DESKTOP_BUTTON_LEFT);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
         route_pad(&device, now + 1000000, NULL);
         assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.mouse.down);
         device.touches = 1; device.touch_id = 3; device.touch_x = 500; device.touch_y = 500;

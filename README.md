@@ -149,6 +149,8 @@ write to `/data/forever/prefix`, see [Troubleshooting](#troubleshooting).
 | **L2** | Escape in Battle.net (closes an open Battle.net dialog or dropdown) |
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
 | Hold the touchpad (still, about 0.4 s) | Voice-to-Text: speech is typed into WoW chat |
+| Click the touchpad with one finger | Left mouse click (also in WoW) |
+| Click the touchpad with two fingers resting on it | Right mouse click (also in WoW) |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).
 

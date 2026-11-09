@@ -221,6 +221,8 @@ static uint64_t osk_chord_drop_at;
 static int touch_active;
 static uint8_t touch_id;
 static uint16_t touch_x, touch_y;
+/* PAD_TOUCHPAD as last handed to the pointer layer, to find a press's edge. */
+static int touch_pressed;
 
 _Static_assert(sizeof(struct wine_ps5_gamepad_state) == 16, "XInput state ABI");
 int scePadSetVibration(int handle, const void *motors);
@@ -857,6 +859,13 @@ static void route_pad(const struct input_event *event, uint64_t now, void *conte
         pointer.lx = pointer.ly = pointer.rx = pointer.ry = 128;
     }
     if (voice.suppress_touch) pointer.code &= ~PAD_TOUCHPAD;
+    /* A touchpad press with two fingers on it is the right button, as on the
+     * desktop and a laptop trackpad; with one it stays the left. The pointer
+     * layer reads the finger count only on the press's edge and holds the
+     * button until release, so only that sample carries it. */
+    int touch_down = !!(pointer.code & PAD_TOUCHPAD);
+    int right_press = touch_down && !touch_pressed && event->touches >= 2;
+    touch_pressed = touch_down;
     if (previous_hold == VOICE_DEFERRED && voice_hold.phase == VOICE_DRAG)
     {
         /* Deliver the withheld down before the accumulated drag, rather than
@@ -875,10 +884,12 @@ static void route_pad(const struct input_event *event, uint64_t now, void *conte
     if (!voice.suppress_motion) touchpad_motion(event);
     else touch_active = 0;
     /* GPU touchpad motion is handled above, not the product's absolute
-     * trackpad/two-finger path. Zero touches makes every pad press a left
-     * click; retaining PAD_TOUCHPAD also keeps that movie-skip escape hatch
-     * active while XInput owns all the other pad buttons/sticks. */
-    pointer.touches = 0;
+     * trackpad/two-finger path. Zero touches keeps the pointer layer from
+     * moving or scrolling and makes a one-finger press a left click; two only
+     * on a two-finger press's edge make it the right. Retaining PAD_TOUCHPAD
+     * keeps both clicks (and the movie-skip escape hatch) active while XInput
+     * owns all the other pad buttons/sticks. */
+    pointer.touches = right_press ? 2 : 0;
     usb_mouse = 1; /* Button transitions must not warp a relative mouse. */
     pointer_input(&pointer, on_pointer, context);
     usb_mouse = 0;
